@@ -23,16 +23,6 @@ class ArduinoSerial:
             msg = msg.decode()
             if "Start" in msg:
                 break
-
-    def calibration(self,):
-        print('Starting Calibration. Please move all joints slowly')
-        self.toggle_imus()
-        t0 = time.monotonic()
-        while time.monotonic() - t0 < 10:
-            self.read_data()
-        self.toggle_imus()
-        self.save_data('calibration')
-        print('Done calibrating')
     
     def toggle_imus(self):
         self.ser.write(b"1")
@@ -43,11 +33,20 @@ class ArduinoSerial:
     def read_data(self):
         self.values.append(self.ser.read(self.packetsize))
     
-    def save_data(self, filename = None, extension = 'data'):
-        if filename == None:
-            current_time_seconds = time.time()
-            filename = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(current_time_seconds)) + f"_{extension}" +  ".bin"
-        with open(os.path.join(self.data_directory, filename), "wb") as bin_file:
+    def save_data(self, calibration = False):
+        current_time_seconds = time.time()
+        if calibration:
+            folder_name = time.strftime("%Y-%m-%d_%H-%M", time.localtime(current_time_seconds))
+            with open(os.path.join(self.data_directory, 'current_folder.txt'), 'w') as current:
+                current.write(folder_name)
+            os.makedirs(os.path.join(self.data_directory, folder_name))
+            filename = 'calibration.bin'
+        else:
+            with open(os.path.join(self.data_directory, 'current_folder.txt'), 'r') as current:
+                folder_name = current.read()
+            filename = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(current_time_seconds)) + '.bin'
+
+        with open(os.path.join(self.data_directory, folder_name, filename), "wb") as bin_file:
             for data in self.values:
                 bin_file.write(data)
         self.values = []

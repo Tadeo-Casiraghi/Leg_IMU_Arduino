@@ -1,6 +1,6 @@
 from classes.arduino_reader import ArduinoSerial
 import signal
-import time
+import argparse
 
 terminate_program = False
 
@@ -13,33 +13,43 @@ def sigterm_handler(signal, frame):
     terminate_program = True
 
 
-def main():
+def main(calibration=False):
     global terminate_program
 
     arduino = ArduinoSerial('COM4',115200) 
     arduino.wait_for_arduino()
 
-    input('Start calibration?')
-    arduino.calibration()
+    if calibration:
+        input('Start calibration?')
+        print('Starting Calibration. Please move all joints slowly')
+        arduino.toggle_imus()
+        while not terminate_program:
+            arduino.read_data()
+        arduino.toggle_imus()
+        arduino.save_data(calibration = True)
+        print('Done calibrating')
 
+    else:
+        input('Start measurements?')
 
-    input('Start measurements?')
+        arduino.toggle_imus()
 
-    arduino.toggle_imus()
-
-    while not terminate_program:
-        arduino.read_data()
+        while not terminate_program:
+            arduino.read_data()
+            
+        arduino.toggle_imus()
         
-    arduino.toggle_imus()
-    arduino.save_data()
+        arduino.save_data()
 
-    arduino.close_serial()
+        arduino.close_serial()
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Read configuration")
+    parser.add_argument("-c", "--calibrate", action="store_true", help = 'Create new data folder and save calibration data')
+    args = parser.parse_args()
     # Register the signal handler
     signal.signal(signal.SIGTERM, sigterm_handler)
     signal.signal(signal.SIGINT, sigterm_handler)
-
-    main()
+    main(args.calibrate)
 

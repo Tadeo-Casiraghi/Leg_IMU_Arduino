@@ -1,6 +1,6 @@
 from lib2to3.pytree import convert
-from classes.madgwickahrs import MadgwickAHRS
-from classes.quaternion import Quaternion
+# from classes.madgwickahrs import MadgwickAHRS
+# from classes.quaternion import Quaternion
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as Rot
@@ -9,18 +9,26 @@ import os
 from classes.imu import IMU
 
 class IMUinterpreter:
-    def __init__(self, filename = None, file_number = -1):
-        if filename == None:
-            current_directory = os.path.dirname(os.path.abspath(__file__))
-            # Go up one directory
-            parent_directory = os.path.dirname(current_directory)
-            # Go into the "data" directory
-            data_directory = os.path.join(parent_directory, 'data')
-            list_of_files = glob.glob(os.path.join(data_directory,'*.bin'))
-            list_of_files.sort()
-            calib_filename = list_of_files[file_number -1]
-            filename = list_of_files[file_number]
-        
+    def __init__(self, directory_number = -1, file_number = -1):
+        current_directory = os.path.dirname(os.path.abspath(__file__))
+        # Go up one directory
+        parent_directory = os.path.dirname(current_directory)
+        # Go into the "data" directory
+        data_directory = os.path.join(parent_directory, 'data')
+        list_of_directories = [x[0] for x in os.walk(data_directory)if len(x[0])>len(data_directory)]
+        list_of_directories.sort()
+        self.directory = list_of_directories[directory_number]
+        list_of_files = glob.glob(os.path.join(self.directory,'*.bin'))
+        list_of_files = [file for file in list_of_files if "calibration" not in file]
+        list_of_files.sort()
+        calib_filename = os.path.join(self.directory, 'calibration.bin')
+        filename = list_of_files[file_number]
+
+        if os.path.exists(os.path.join(self.directory, 'calibration.npz')):
+            self.calibrated = True
+        else:
+            self.calibrated = False
+
         with open(calib_filename,'rb') as file:
             self.calib_data = file.read()
 
@@ -47,7 +55,7 @@ class IMUinterpreter:
                 imu.decode_data(data[pointer:(pointer + 12)], calibration)
                 pointer += 12
             for imu in self.imus:
-                imu.decode_time(self.raw[pointer:(pointer+4)], calibration)
+                imu.decode_time(data[pointer:(pointer+4)], calibration)
             pointer += 4
         
     def get_gdot(self, g, t):
@@ -113,17 +121,21 @@ class IMUinterpreter:
         return jacobs
     
     def calc_jacobian2(self, a1, a2, g1, g2, g1dot, g2dot, o):
-        o1 = o[0:3,]
-        o2 = o[3:7,]
+        o1 = o[0:3]
+        o2 = o[3:7]
         jacobs = np.zeros((len(g1), 6))
         for index, (a1k, a2k, g1k, g2k, g1kdot, g2kdot) in \
                         enumerate(zip(a1, a2, g1, g2, g1dot, g2dot)):
-            temp = self.calc_gammaT(a1k - self.calc_gamma(o1, g1k, g1kdot), g1k, g1kdot) / np.linalg.norm(a1k -  self.calc_gamma(o1, g1k, g1kdot))
+            gammagioi = self.calc_gamma(o1, g1k, g1kdot)
+            resta = a1k - gammagioi
+            temp = self.calc_gammaT(resta, g1k, g1kdot) / np.linalg.norm(resta)
             jacobs[index, 0] = temp[0]
             jacobs[index, 1] = temp[1]
             jacobs[index, 2] = temp[2]
 
-            temp = self.calc_gammaT(a2k - self.calc_gamma(o2, g2k, g2kdot), g2k, g2kdot) / np.linalg.norm(a2k -  self.calc_gamma(o2, g2k, g2kdot))
+            gammagioi = self.calc_gamma(o2, g2k, g2kdot)
+            resta = a2k - gammagioi
+            temp = self.calc_gammaT(resta, g2k, g2kdot) / np.linalg.norm(resta)
             jacobs[index, 3] = -temp[0]
             jacobs[index, 4] = -temp[1]
             jacobs[index, 5] = -temp[2]
@@ -161,40 +173,176 @@ class IMUinterpreter:
     
     def converge_o1o2(self, a1, a2, g1, g2, g1dot, g2dot):
         o = np.array([0.0]*6).T
-        oold = np.array([1.0]*6).T
-        acceptable = 0.001
+        oold = np.array([0.01]*6).T
+        acceptable = 0.0001
         while not all(abs(o - oold) < acceptable):
             error = self.calc_error2(a1, a2, g1, g2, g1dot, g2dot, o)
             jacobian = self.calc_jacobian2(a1, a2, g1, g2, g1dot, g2dot, o)
             oold = o.copy()
-            o -= np.matmul(np.linalg.pinv(jacobian), np.array(error))
+            o += np.matmul(np.linalg.pinv(jacobian), np.array(error))
             print(f'the sum of errors is for o is {sum(abs(o - oold))}')
         o1 = o[0:3]
         o2 = o[3:7]
         return o1, o2
 
-
     
     def calibrate_pair(self, a1, a2, g1, g2, g1dot, g2dot, t):
         a1, a2, g1, g2, g1dot, g2dot = self.generate_dataset(a1, a2, g1, g2, g1dot, g2dot, t)
+        print('Calibrating j1 and j2')
         j1, j2 = self.converge_j1j2(g1, g2)
+        print('\nCalibrating o1 and o2')
         o1, o2 = self.converge_o1o2(a1, a2, g1, g2, g1dot, g2dot)
         return j1, j2, o1, o2
 
-    
     def calibrate(self,):
-        self.gdots = []
-        for imu in self.imus:
-            self.gdots.append(self.get_gdot(imu.calib_gyro, imu.calib_times))
-        j1, j2, o1, o2 = self.calibrate_pair(self.imus[0].calib_accel,
-                            self.imus[1].calib_accel,
-                            self.imus[0].calib_gyro,
-                            self.imus[1].calib_gyro,
-                            self.gdots[0],
-                            self.gdots[1],
-                            self.calib_times)
-        self.j1 = j1
-        self.j2 = j2
-        self.o1 = o1
-        self.o2 = o2
+        if self.calibrated:
+            print('Already calibrated!')
+            loaded = np.load(os.path.join(self.directory, 'calibration.npz'))
+            self.knee_j1 = loaded['knee_j1']
+            self.knee_j2 = loaded['knee_j2']
+            self.knee_o1 = loaded['knee_o1']
+            self.knee_o2 = loaded['knee_o2']
+            self.ankle_j1 = loaded['ankle_j1']
+            self.ankle_j2 = loaded['ankle_j2']
+            self.ankle_o1 = loaded['ankle_o1']
+            self.ankle_o2 = loaded['ankle_o2']
+            self.gdots = loaded['gdots']
+            print('Data loaded')
+        else:
+            self.gdots = []
+            for imu in self.imus:
+                self.gdots.append(self.get_gdot(imu.calib_gyro, imu.calib_times))
+            print('Calibrating knee joint vectors')
+            j1, j2, o1, o2 = self.calibrate_pair(self.imus[0].calib_accel,
+                                self.imus[1].calib_accel,
+                                self.imus[0].calib_gyro,
+                                self.imus[1].calib_gyro,
+                                self.gdots[0],
+                                self.gdots[1],
+                                self.calib_times)
+            self.knee_j1 = j1
+            self.knee_j2 = j2
+            self.knee_o1 = o1
+            self.knee_o2 = o2
+            print('Done calibrating knee')
+            print()
+            print('Calibrating ankle joint vectors')
+            j1, j2, o1, o2 = self.calibrate_pair(self.imus[1].calib_accel,
+                                self.imus[2].calib_accel,
+                                self.imus[1].calib_gyro,
+                                self.imus[2].calib_gyro,
+                                self.gdots[1],
+                                self.gdots[2],
+                                self.calib_times)
+            self.ankle_j1 = j1
+            self.ankle_j2 = -j2
+            self.ankle_o1 = o1
+            self.ankle_o2 = o2
+            print('Done calibrating ankle')
+            print()
+            print('Saving files')
+            np.savez(os.path.join(self.directory, 'calibration.npz'),
+                    knee_j1 = self.knee_j1,
+                    knee_j2 = self.knee_j2,
+                    knee_o1 = self.knee_o1,
+                    knee_o2 = self.knee_o2,
+                    ankle_j1 = self.ankle_j1,
+                    ankle_j2 = self.ankle_j2,
+                    ankle_o1 = self.ankle_o1,
+                    ankle_o2 = self.ankle_o2,
+                    gdots = np.array(self.gdots))
+    
+    def signed_angle(self, v1, v2):
+        """
+        Calculate the signed angle between two 2D vectors.
         
+        Parameters:
+        v1 (array-like): The first vector.
+        v2 (array-like): The second vector.
+        
+        Returns:
+        float: The signed angle between v1 and v2 in radians.
+        """
+        # Convert to numpy arrays
+        v1 = np.array(v1)
+        v2 = np.array(v2)
+        
+        # Calculate the angle between the vectors
+        angle = np.arctan2(v2[1], v2[0]) - np.arctan2(v1[1], v1[0])
+        
+        # Normalize the angle to the range [-π, π]
+        if angle > np.pi:
+            angle -= 2 * np.pi
+        elif angle < -np.pi:
+            angle += 2 * np.pi
+        
+        return angle
+
+    def get_alpha_gyro(self, g1, g2, j1, j2):
+        dt = np.average(np.diff(self.times))
+        angle = []
+        for g1k, g2k in zip(g1, g2):
+            if angle == []:
+                angle.append((np.matmul(g1k, j1) - np.matmul(g2k,j2))*dt)
+            else:
+                angle.append(angle[-1] + (np.matmul(g1k, j1) - np.matmul(g2k, j2))*dt)
+        return angle
+    
+    def get_alpha_accel(self, o1, o2, j1, j2, g1, g2, a1, a2, g1dot, g2dot):
+        o1rot = o1 - j1 * (np.dot(o1, j1) + np.dot(o2, j2)) * 0.5
+        o2rot = o2 - j2 * (np.dot(o1, j1) + np.dot(o2, j2)) * 0.5
+        
+        x1 = np.cross(j1, [1,1,1])
+        y1 = np.cross(j1, x1)
+
+        x2 = np.cross(j2, [1,1,1])
+        y2 = np.cross(j2, x2)
+
+        angle = []
+        for a1k, a2k, g1k, g2k, g1kdot, g2kdot in zip(a1[2:-2],
+                                                      a2[2:-2],
+                                                      g1[2:-2],
+                                                      g2[2:-2],
+                                                      g1dot, g2dot):
+            a1prime = a1k - self.calc_gamma(o1rot, g1k, g1kdot)
+            a2prime = a2k - self.calc_gamma(o2rot, g2k, g2kdot)
+
+            temp1 = np.array([np.dot(a1prime, x1), np.dot(a1prime, y1)])
+            temp2 = np.array([np.dot(a2prime, x2), np.dot(a2prime, y2)])
+
+            angle.append(self.signed_angle(temp1, temp2))
+        
+        return angle
+
+    def get_alpha_fusion(self, gyro, accel):
+        gyro = np.array(gyro)+accel[0]
+        angle = [accel[0]]
+        lamb = 0.015
+        for ag, aa, agold in zip(gyro[3:-2], accel[1:], gyro[2:-3]):
+            angle.append(lamb*aa + (1 -lamb)*(angle[-1] + ag - agold))
+        
+        return np.array(gyro), np.array(accel), np.array(angle)
+    
+    def get_data(self, joint):
+        if joint == 'knee':
+            return self.knee_o1, self.knee_o2, self.knee_j1, self.knee_j2, \
+                   self.imus[0].gyro, self.imus[1].gyro, \
+                   self.imus[0].accel, self.imus[1].accel, \
+                   self.gdots[0], self.gdots[1]
+        elif joint == 'ankle':
+            return self.ankle_o1, self.ankle_o2, self.ankle_j1, self.ankle_j2, \
+                   self.imus[1].gyro, self.imus[2].gyro, \
+                   self.imus[1].accel, self.imus[2].accel, \
+                   self.gdots[2], self.gdots[2]
+    
+    def calculate_angles(self, ):
+        for i in ['knee', 'ankle']:
+            o1, o2, j1, j2, g1, g2, a1, a2, g1dot, g2dot = self.get_data(i)
+            gyro = self.get_alpha_gyro(g1, g2, j1, j2)
+            accel = self.get_alpha_accel(o1, o2, j1, j2, g1, g2, a1, a2, g1dot, g2dot)
+            if i == 'knee':
+                self.knee_gyro, self.knee_accel, self.knee_fusion = self.get_alpha_fusion(gyro, accel)
+            else:
+                self.ankle_gyro, self.ankle_accel, self.ankle_fusion = self.get_alpha_fusion(gyro, accel)
+
+
