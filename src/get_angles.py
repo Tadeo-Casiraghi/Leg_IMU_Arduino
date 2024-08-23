@@ -4,7 +4,7 @@ import numpy as np
 
 
 
-decoder = IMUinterpreter(file_number=0)
+decoder = IMUinterpreter(file_number=1)
 
 decoder.calibrate()
 

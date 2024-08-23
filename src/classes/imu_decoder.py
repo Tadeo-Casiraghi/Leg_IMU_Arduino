@@ -220,8 +220,16 @@ class IMUinterpreter:
                                 self.gdots[0],
                                 self.gdots[1],
                                 self.calib_times)
-            self.knee_j1 = j1
-            self.knee_j2 = j2
+
+            for signo1, signo2 in zip([1,1,-1,-1], [1,-1,1,-1]):
+                angles = self.get_alpha_gyro(self.imus[0].calib_gyro, self.imus[1].calib_gyro, signo1*j1, signo2*j2)
+                if max(angles)*180/np.pi < 20:
+                    signo_1 = signo1
+                    signo_2 = signo2
+                    break
+
+            self.knee_j1 = signo_1 * j1
+            self.knee_j2 = signo_2 * j2
             self.knee_o1 = o1
             self.knee_o2 = o2
             print('Done calibrating knee')
@@ -234,8 +242,16 @@ class IMUinterpreter:
                                 self.gdots[1],
                                 self.gdots[2],
                                 self.calib_times)
-            self.ankle_j1 = j1
-            self.ankle_j2 = -j2
+            
+            for signo1, signo2 in zip([1,1,-1,-1], [1,-1,1,-1]):
+                angles = self.get_alpha_gyro(self.imus[1].calib_gyro, self.imus[2].calib_gyro, signo1*j1, signo2*j2)
+                if (max(angles) - min(angles))*180/np.pi < 100 and max(angles)*180/np.pi<30:
+                    signo_1 = signo1
+                    signo_2 = signo2
+                    break
+            
+            self.ankle_j1 = signo_1 * j1
+            self.ankle_j2 = signo_2 * j2
             self.ankle_o1 = o1
             self.ankle_o2 = o2
             print('Done calibrating ankle')
