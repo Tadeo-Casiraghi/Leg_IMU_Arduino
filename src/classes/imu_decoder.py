@@ -44,8 +44,15 @@ class IMUinterpreter:
         self.decode(self.raw)
         self.decode(self.calib_data, calibration = True)
 
+       
         self.times = self.imus[0].times
         self.calib_times = self.imus[0].calib_times
+
+        # for i in range(3):
+        #     plt.figure()
+        #     plt.plot(self.calib_times, self.imus[i].calib_accel)
+        #     plt.show()
+
         
 
     def decode(self, data, calibration = False):
@@ -198,15 +205,17 @@ class IMUinterpreter:
         if self.calibrated:
             print('Already calibrated!')
             loaded = np.load(os.path.join(self.directory, 'calibration.npz'))
-            self.knee_j1 = loaded['knee_j1']
+            self.knee_j1 = -loaded['knee_j1']
             self.knee_j2 = loaded['knee_j2']
             self.knee_o1 = loaded['knee_o1']
             self.knee_o2 = loaded['knee_o2']
             self.ankle_j1 = loaded['ankle_j1']
-            self.ankle_j2 = loaded['ankle_j2']
+            self.ankle_j2 = -loaded['ankle_j2']
             self.ankle_o1 = loaded['ankle_o1']
             self.ankle_o2 = loaded['ankle_o2']
-            self.gdots = loaded['gdots']
+            self.gdots = []
+            for imu in self.imus:
+                self.gdots.append(self.get_gdot(imu.gyro, imu.times))
             print('Data loaded')
         else:
             self.gdots = []
@@ -265,8 +274,10 @@ class IMUinterpreter:
                     ankle_j1 = self.ankle_j1,
                     ankle_j2 = self.ankle_j2,
                     ankle_o1 = self.ankle_o1,
-                    ankle_o2 = self.ankle_o2,
-                    gdots = np.array(self.gdots))
+                    ankle_o2 = self.ankle_o2)
+            self.gdots = []
+            for imu in self.imus:
+                self.gdots.append(self.get_gdot(imu.gyro, imu.times))
     
     def signed_angle(self, v1, v2):
         """
@@ -315,6 +326,8 @@ class IMUinterpreter:
         y2 = np.cross(j2, x2)
 
         angle = []
+        supp = 0
+        flag = True
         for a1k, a2k, g1k, g2k, g1kdot, g2kdot in zip(a1[2:-2],
                                                       a2[2:-2],
                                                       g1[2:-2],
@@ -326,7 +339,18 @@ class IMUinterpreter:
             temp1 = np.array([np.dot(a1prime, x1), np.dot(a1prime, y1)])
             temp2 = np.array([np.dot(a2prime, x2), np.dot(a2prime, y2)])
 
-            angle.append(self.signed_angle(temp1, temp2))
+            current = self.signed_angle(temp1, temp2)
+            # if flag:
+            #     flag = False
+            #     past = current
+            # if current - past > 1.8*np.pi:
+            #     supp -= 2*np.pi
+            # elif past - current > 1.8*np.pi:
+            #     supp += 2*np.pi
+
+
+            past = current
+            angle.append(current + supp)
         
         return angle
 
@@ -349,7 +373,7 @@ class IMUinterpreter:
             return self.ankle_o1, self.ankle_o2, self.ankle_j1, self.ankle_j2, \
                    self.imus[1].gyro, self.imus[2].gyro, \
                    self.imus[1].accel, self.imus[2].accel, \
-                   self.gdots[2], self.gdots[2]
+                   self.gdots[1], self.gdots[2]
     
     def calculate_angles(self, ):
         for i in ['knee', 'ankle']:
