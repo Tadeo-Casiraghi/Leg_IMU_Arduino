@@ -1,12 +1,10 @@
-from lib2to3.pytree import convert
-# from classes.madgwickahrs import MadgwickAHRS
-# from classes.quaternion import Quaternion
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.spatial.transform import Rotation as Rot
 import glob
 import os
 from classes.imu import IMU
+from scipy.optimize import minimize
+import matplotlib.pyplot as plt
+
 
 class IMUinterpreter:
     def __init__(self, directory_number = -1, file_number = -1):
@@ -22,7 +20,10 @@ class IMUinterpreter:
         list_of_files = [file for file in list_of_files if "calibration" not in file]
         list_of_files.sort()
         calib_filename = os.path.join(self.directory, 'calibration.bin')
-        filename = list_of_files[file_number]
+        if file_number == None:
+            filename = os.path.join(self.directory, 'calibration.bin')
+        else:
+            filename = list_of_files[file_number]
 
         if os.path.exists(os.path.join(self.directory, 'calibration.npz')):
             self.calibrated = True
@@ -43,7 +44,7 @@ class IMUinterpreter:
 
         self.decode(self.raw)
         self.decode(self.calib_data, calibration = True)
-
+        # self.clean()
        
         self.times = self.imus[0].times
         self.calib_times = self.imus[0].calib_times
@@ -53,7 +54,9 @@ class IMUinterpreter:
         #     plt.plot(self.calib_times, self.imus[i].calib_accel)
         #     plt.show()
 
-        
+    def clean(self,):
+        for imu in self.imus:
+            imu.clean_all()
 
     def decode(self, data, calibration = False):
         pointer = 0
@@ -76,7 +79,7 @@ class IMUinterpreter:
         S = [[a1[2]], [a2[2]], [g1[2]], [g2[2]], [g1dot[0]], [g2dot[0]]]
         tprev = t[2]
         for index, tim in enumerate(t[2:-2]):
-            if tim - tprev > 0.1:
+            if tim - tprev > 0.05:
                 S[0].append(a1[2+index])
                 S[1].append(a2[2+index])
                 S[2].append(g1[2+index])
@@ -148,19 +151,30 @@ class IMUinterpreter:
             jacobs[index, 5] = -temp[2]
         return jacobs
 
-
+    def calc_error1_abs(self, x, g1, g2):
+        j1, j2 = self.calc_j(x)
+        
+        error = 0
+        for g1k, g2k in zip(g1, g2):
+            error += (np.linalg.norm(np.cross(g1k, j1)) - np.linalg.norm(np.cross(g2k, j2)))**2
+        return error
+    
     def converge_j1j2(self, g1, g2):
+        # x = np.array([np.pi/4]*4).T
+        # xold = np.array([100.0]*4).T
+        # acceptable = 0.0001
+        # while not all(abs(x - xold) < acceptable):
+        #     j1, j2 = self.calc_j(x)
+        #     error = self.calc_error1(g1, g2, j1, j2)
+        #     jacobians = self.calc_jacobian1(g1, g2, j1, j2, x)
+        #     xold = x.copy()
+        #     x -= np.matmul(np.linalg.pinv(jacobians), error)
+        #     print(f'the sum of errors is for x is {sum(abs(x - xold))}')
+
         x = np.array([np.pi/4]*4).T
-        xold = np.array([100.0]*4).T
-        acceptable = 0.0001
-        while not all(abs(x - xold) < acceptable):
-            j1, j2 = self.calc_j(x)
-            error = self.calc_error1(g1, g2, j1, j2)
-            jacobians = self.calc_jacobian1(g1, g2, j1, j2, x)
-            xold = x.copy()
-            x -= np.matmul(np.linalg.pinv(jacobians), error)
-            print(f'the sum of errors is for x is {sum(abs(x - xold))}')
-        return self.calc_j(x)
+        res = minimize(self.calc_error1_abs, x, method = 'BFGS', args=(g1, g2), options = {'disp':True})
+        return self.calc_j(res.x)
+
 
     def calc_gamma(self, oi, gi, gidot):
         return np.cross(gi, np.cross(gi, oi)) + np.cross(gidot, oi)
@@ -177,19 +191,31 @@ class IMUinterpreter:
             gamma2 = self.calc_gamma(o2, g2k, g2kdot)
             error.append(np.linalg.norm(a1k - gamma1) - np.linalg.norm(a2k - gamma2))
         return error
-    
-    def converge_o1o2(self, a1, a2, g1, g2, g1dot, g2dot):
-        o = np.array([0.0]*6).T
-        oold = np.array([0.01]*6).T
-        acceptable = 0.0001
-        while not all(abs(o - oold) < acceptable):
-            error = self.calc_error2(a1, a2, g1, g2, g1dot, g2dot, o)
-            jacobian = self.calc_jacobian2(a1, a2, g1, g2, g1dot, g2dot, o)
-            oold = o.copy()
-            o += np.matmul(np.linalg.pinv(jacobian), np.array(error))
-            print(f'the sum of errors is for o is {sum(abs(o - oold))}')
+
+    def calc_error2_abs(self, o, a1, a2, g1, g2, g1dot, g2dot):
         o1 = o[0:3]
         o2 = o[3:7]
+        error = 0
+        for a1k, a2k, g1k, g2k, g1kdot, g2kdot in zip(a1, a2, g1, g2, g1dot, g2dot):
+            gamma1 = self.calc_gamma(o1, g1k, g1kdot)
+            gamma2 = self.calc_gamma(o2, g2k, g2kdot)
+            error += (np.linalg.norm(a1k - gamma1) - np.linalg.norm(a2k - gamma2))**2
+        return error
+    
+    def converge_o1o2(self, a1, a2, g1, g2, g1dot, g2dot):
+        # o = np.array([0.0]*6).T
+        # oold = np.array([0.01]*6).T
+        # acceptable = 0.0001
+        # while not all(abs(o - oold) < acceptable):
+        #     error = self.calc_error2(a1, a2, g1, g2, g1dot, g2dot, o)
+        #     jacobian = self.calc_jacobian2(a1, a2, g1, g2, g1dot, g2dot, o)
+        #     oold = o.copy()
+        #     o += np.matmul(np.linalg.pinv(jacobian), np.array(error))
+        #     print(f'the sum of errors is for o is {sum(abs(o - oold))}')
+        o = np.array([0.0]*6).T
+        res = minimize(self.calc_error2_abs, o, method = 'BFGS', args=(a1, a2, g1, g2, g1dot, g2dot), options= {'disp':True})
+        o1 = res.x[0:3]
+        o2 = res.x[3:7]
         return o1, o2
 
     
@@ -205,12 +231,12 @@ class IMUinterpreter:
         if self.calibrated:
             print('Already calibrated!')
             loaded = np.load(os.path.join(self.directory, 'calibration.npz'))
-            self.knee_j1 = -loaded['knee_j1']
+            self.knee_j1 = loaded['knee_j1']
             self.knee_j2 = loaded['knee_j2']
             self.knee_o1 = loaded['knee_o1']
             self.knee_o2 = loaded['knee_o2']
             self.ankle_j1 = loaded['ankle_j1']
-            self.ankle_j2 = -loaded['ankle_j2']
+            self.ankle_j2 = loaded['ankle_j2']
             self.ankle_o1 = loaded['ankle_o1']
             self.ankle_o2 = loaded['ankle_o2']
             self.gdots = []
@@ -229,14 +255,14 @@ class IMUinterpreter:
                                 self.gdots[0],
                                 self.gdots[1],
                                 self.calib_times)
-
+            
             for signo1, signo2 in zip([1,1,-1,-1], [1,-1,1,-1]):
                 angles = self.get_alpha_gyro(self.imus[0].calib_gyro, self.imus[1].calib_gyro, signo1*j1, signo2*j2)
-                if max(angles)*180/np.pi < 20:
+                if (max(angles) - min(angles) < 150/180*np.pi) and min(angles)*180/np.pi < -50:
                     signo_1 = signo1
                     signo_2 = signo2
                     break
-
+            
             self.knee_j1 = signo_1 * j1
             self.knee_j2 = signo_2 * j2
             self.knee_o1 = o1
@@ -254,13 +280,13 @@ class IMUinterpreter:
             
             for signo1, signo2 in zip([1,1,-1,-1], [1,-1,1,-1]):
                 angles = self.get_alpha_gyro(self.imus[1].calib_gyro, self.imus[2].calib_gyro, signo1*j1, signo2*j2)
-                if (max(angles) - min(angles))*180/np.pi < 100 and max(angles)*180/np.pi<30:
+                if (max(angles) - min(angles))*180/np.pi < 90 and max(angles)*180/np.pi<15:
                     signo_1 = signo1
                     signo_2 = signo2
                     break
             
-            self.ankle_j1 = signo_1 * j1
-            self.ankle_j2 = signo_2 * j2
+            self.ankle_j1 = -signo_1 * j1
+            self.ankle_j2 = -signo_2 * j2
             self.ankle_o1 = o1
             self.ankle_o2 = o2
             print('Done calibrating ankle')
@@ -327,7 +353,7 @@ class IMUinterpreter:
 
         angle = []
         supp = 0
-        flag = True
+        # flag = True
         for a1k, a2k, g1k, g2k, g1kdot, g2kdot in zip(a1[2:-2],
                                                       a2[2:-2],
                                                       g1[2:-2],
@@ -343,13 +369,13 @@ class IMUinterpreter:
             # if flag:
             #     flag = False
             #     past = current
-            # if current - past > 1.8*np.pi:
+            # if current - past > np.pi:
             #     supp -= 2*np.pi
-            # elif past - current > 1.8*np.pi:
+            # elif past - current > np.pi:
             #     supp += 2*np.pi
 
 
-            past = current
+            # past = current
             angle.append(current + supp)
         
         return angle

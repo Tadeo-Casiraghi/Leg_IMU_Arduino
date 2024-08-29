@@ -10,3 +10,5 @@ src/classes/__pycache__/quaternion.cpython-310.pyc
 src/classes/__pycache__/arduino_reader.cpython-39.pyc
 
 src/classes/__pycache__/imu_decoder.cpython-39.pyc
+
+src/classes/__pycache__/
