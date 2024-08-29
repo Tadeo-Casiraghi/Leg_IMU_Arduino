@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.signal import savgol_filter
 
 class IMU:
 
@@ -35,23 +36,30 @@ class IMU:
                 self.gyro.append(temp * self.gyro_scale)
 
     def clean_all(self,):
-        self.gyro = self.clean_signal(self.gyro, 4*16348*self.gyro_scale)
-        self.calib_gyro = self.clean_signal(self.calib_gyro, 4*16348*self.gyro_scale)
+        # self.gyro = self.clean_signal(self.gyro, 4*16348*self.gyro_scale)
+        # self.calib_gyro = self.clean_signal(self.calib_gyro, 4*16348*self.gyro_scale)
         self.accel = self.clean_signal(self.accel, 4*16348*self.accel_scale)
         self.calib_accel = self.clean_signal(self.calib_accel, 4*16348*self.accel_scale)
 
     def clean_signal(self, signal, total):
-        clean = [signal[0]]
-        adder = [0]*3
-        for sig0, sig1 in zip(signal[0:-1], signal[1:]):
-            temp = [0]*3
-            for axis in range(3):
-                if sig1[axis] - sig0[axis] > total*0.5:
-                    adder[axis] -= total
-                elif sig1[axis] - sig0[axis] < -total*0.5:
-                    adder[axis] += total
-                temp[axis] = sig1[axis] + adder[axis]
-            clean.append(np.array(temp))
+        # clean = [signal[0]]
+        # adder = [0]*3
+        # for sig0, sig1 in zip(signal[0:-1], signal[1:]):
+        #     temp = [0]*3
+        #     for axis in range(3):
+        #         if sig1[axis] - sig0[axis] > total*0.5:
+        #             adder[axis] -= total
+        #         elif sig1[axis] - sig0[axis] < -total*0.5:
+        #             adder[axis] += total
+        #         temp[axis] = sig1[axis] + adder[axis]
+        #     clean.append(np.array(temp))
+        test = [[],[],[]]
+        for j in range(3):
+            data = [val[j] for val in signal]
+            test[j] = savgol_filter(data, 171, 3)
+        clean = []
+        for x, y, z in zip(test[0], test[1], test[2]):
+            clean.append(np.array([x,y,z]))
         return clean
 
     def decode_time(self, data, calibration = False):

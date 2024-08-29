@@ -3,12 +3,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-
-decoder = IMUinterpreter(directory_number=-1,file_number=-3)
+decoder = IMUinterpreter(directory_number=-1,file_number=None)
 
 decoder.calibrate()
 
 decoder.calculate_angles()
+
+print(decoder.knee_o1)
+print(decoder.knee_o2)
+print(decoder.ankle_o1)
+print(decoder.ankle_o2)
 
 # for i in range(3):
 #     plt.figure()

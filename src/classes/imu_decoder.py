@@ -79,7 +79,7 @@ class IMUinterpreter:
         S = [[a1[2]], [a2[2]], [g1[2]], [g2[2]], [g1dot[0]], [g2dot[0]]]
         tprev = t[2]
         for index, tim in enumerate(t[2:-2]):
-            if tim - tprev > 0.05:
+            if tim - tprev > 0.1:
                 S[0].append(a1[2+index])
                 S[1].append(a2[2+index])
                 S[2].append(g1[2+index])
@@ -255,14 +255,16 @@ class IMUinterpreter:
                                 self.gdots[0],
                                 self.gdots[1],
                                 self.calib_times)
-            
-            for signo1, signo2 in zip([1,1,-1,-1], [1,-1,1,-1]):
+            signos = ((1,1),(1,-1),(-1,1),(-1,-1))
+            plt.figure()
+            for signo1, signo2, num in zip([1,1,-1,-1], [1,-1,1,-1], [1, 2, 3, 4]):
                 angles = self.get_alpha_gyro(self.imus[0].calib_gyro, self.imus[1].calib_gyro, signo1*j1, signo2*j2)
-                if (max(angles) - min(angles) < 150/180*np.pi) and min(angles)*180/np.pi < -50:
-                    signo_1 = signo1
-                    signo_2 = signo2
-                    break
-            
+                plt.plot(np.array(angles)*180/np.pi, label = f'{num}) {signo1} {signo2}')
+            plt.legend()
+            plt.show()
+
+            signo_1, signo_2 = signos[int(input('Ingrese número seleccionado:    ')) - 1]
+                        
             self.knee_j1 = signo_1 * j1
             self.knee_j2 = signo_2 * j2
             self.knee_o1 = o1
@@ -277,16 +279,18 @@ class IMUinterpreter:
                                 self.gdots[1],
                                 self.gdots[2],
                                 self.calib_times)
-            
-            for signo1, signo2 in zip([1,1,-1,-1], [1,-1,1,-1]):
+
+            plt.figure()
+            for signo1, signo2 , num in zip([1,1,-1,-1], [1,-1,1,-1], [1,2,3,4]):
                 angles = self.get_alpha_gyro(self.imus[1].calib_gyro, self.imus[2].calib_gyro, signo1*j1, signo2*j2)
-                if (max(angles) - min(angles))*180/np.pi < 90 and max(angles)*180/np.pi<15:
-                    signo_1 = signo1
-                    signo_2 = signo2
-                    break
-            
-            self.ankle_j1 = -signo_1 * j1
-            self.ankle_j2 = -signo_2 * j2
+                plt.plot(np.array(angles)*180/np.pi, label = f'{num}) {signo1} {signo2}')
+            plt.legend()
+            plt.show()
+
+            signo_1, signo_2 = signos[int(input('Ingrese número seleccionado:    ')) - 1]
+
+            self.ankle_j1 = signo_1 * j1
+            self.ankle_j2 = signo_2 * j2
             self.ankle_o1 = o1
             self.ankle_o2 = o2
             print('Done calibrating ankle')
