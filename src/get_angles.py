@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-decoder = IMUinterpreter(directory_number=-1,file_number=None)
+decoder = IMUinterpreter(directory_number=-1,file_number=-1)
 
 decoder.calibrate()
 

@@ -16,7 +16,7 @@ def sigterm_handler(signal, frame):
 def main(calibration=False):
     global terminate_program
 
-    arduino = ArduinoSerial('COM4',115200) 
+    arduino = ArduinoSerial('COM3',115200) 
     arduino.wait_for_arduino()
 
     if calibration:
