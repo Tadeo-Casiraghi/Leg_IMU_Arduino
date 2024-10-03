@@ -1,0 +1,34 @@
+{
+    "raw_accel" : false,
+    "raw_gyro"  : false,
+    "scale_accel" : 9.81,
+    "scale_gyro" : 1,
+    "ground_truth" : {
+        "available" : true,
+        "path" : "ground_truth.csv",
+        "knee" : "knee_angle_r",
+        "ankle" : "ankle_angle_r",
+        "header" : "Header"
+    },
+    "names" : {
+        "Header" : "Header",
+        "foot_Accel_X" : "foot_Accel_X",
+        "foot_Accel_Y" : "foot_Accel_Y",
+        "foot_Accel_Z" : "foot_Accel_Z",
+        "foot_Gyro_X" : "foot_Gyro_X",
+        "foot_Gyro_Y" : "foot_Gyro_Y",
+        "foot_Gyro_Z" : "foot_Gyro_Z",
+        "shank_Accel_X" : "shank_Accel_X",
+        "shank_Accel_Y" : "shank_Accel_Y",
+        "shank_Accel_Z" : "shank_Accel_Z",
+        "shank_Gyro_X" : "shank_Gyro_X",
+        "shank_Gyro_Y" : "shank_Gyro_Y",
+        "shank_Gyro_Z" : "shank_Gyro_Z",
+        "thigh_Accel_X" : "thigh_Accel_X",
+        "thigh_Accel_Y" : "thigh_Accel_Y",
+        "thigh_Accel_Z" : "thigh_Accel_Z",
+        "thigh_Gyro_X" : "thigh_Gyro_X",
+        "thigh_Gyro_Y" : "thigh_Gyro_Y",
+        "thigh_Gyro_Z" : "thigh_Gyro_Z"
+    }
+}
