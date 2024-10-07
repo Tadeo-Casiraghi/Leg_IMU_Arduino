@@ -19,9 +19,11 @@ angles = ANGLE_extractor(directory_name, sub_directory_name, file_name)
 
 angles.calibrate()
 
-angles.calculate_angles('knee', lamb = 0.0015078125)
+angles.calculate_angles('knee', lamb = [])
 
-angles.calculate_angles('ankle', lamb = 0.018250)
+angles.calculate_angles('ankle', lamb = [])
+
+angles.save_angles()
 
 # plt.figure()
 # plt.plot(angles.imus['header'], angles.knee_gyro*180/np.pi, label = 'gyro', alpha=0.2)

@@ -1,15 +1,9 @@
 {
+    "dataset_path": "ADD_PATH_TO_DATASET",
     "raw_accel" : false,
     "raw_gyro"  : false,
     "scale_accel" : 9.81,
     "scale_gyro" : 1,
-    "ground_truth" : {
-        "available" : true,
-        "path" : "ground_truth.csv",
-        "knee" : "knee_angle_r",
-        "ankle" : "ankle_angle_r",
-        "header" : "Header"
-    },
     "names" : {
         "Header" : "Header",
         "foot_Accel_X" : "foot_Accel_X",

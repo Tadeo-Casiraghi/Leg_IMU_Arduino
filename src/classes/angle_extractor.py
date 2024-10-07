@@ -616,3 +616,14 @@ class ANGLE_extractor:
                 self.knee_gyro, self.knee_accel, self.knee_fusion, self.knee_time = self.get_alpha_fusion(gyro, accel, res.x[0])
             else:
                 self.ankle_gyro, self.ankle_accel, self.ankle_fusion, self.ankle_time = self.get_alpha_fusion(gyro, accel, res.x[0])
+
+
+    def save_angles(self,):
+        with open(os.path.join(self.directory, 'angles.csv'), 'w') as file:
+            file.write('Time,Knee_gyro,Knee_accel,Knee_fusion,Ankle_gyro,Ankle_accel,Ankle_fusion\n')
+            for time, knee_gyro, knee_accel, knee_fusion, ankle_gyro, ankle_accel, ankle_fusion in \
+                zip(self.knee_time, \
+                    self.knee_gyro, self.knee_accel, self.knee_fusion, \
+                    self.ankle_gyro, self.ankle_accel, self.ankle_fusion):
+                
+                file.write(f'{time},{knee_gyro*180/np.pi},{knee_accel*180/np.pi},{knee_fusion*180/np.pi},{ankle_gyro*180/np.pi},{ankle_accel*180/np.pi},{ankle_fusion*180/np.pi}\n')
