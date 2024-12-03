@@ -1,55 +1,117 @@
 import numpy as np
 import glob
+import shutil
 import os
+import scipy.io
 from scipy.optimize import minimize
 from scipy.signal import find_peaks, butter, filtfilt
 import matplotlib.pyplot as plt
-import scipy.io as sio
 import pandas as pd
 from classes.imu_decoder import read_data
 
 graph = False
 
-class ANGLE_extractor:
-    def __init__(self, directory_name = 'data', sub_directory_name = -1, file_name = -1):
+class DATASET_extractor:
+    def __init__(self,):
         current_directory = os.path.dirname(os.path.abspath(__file__))
         # Go up one directory
         parent_directory = os.path.dirname(current_directory)
-        data_directory = os.path.join(parent_directory, directory_name)
-        list_of_directories = [x[0] for x in os.walk(data_directory)if len(x[0])>len(data_directory)]
+        self.settings = pd.read_json(os.path.join(parent_directory, 'dataset', 'settings.json'), typ='series')
+        data_directory = self.settings['dataset_path']
+        list_of_directories = os.listdir(data_directory)
         list_of_directories.sort()
+        self.list_of_directories = list_of_directories
 
-        if type(sub_directory_name) == int:
-            self.directory = list_of_directories[sub_directory_name]
-        else:
-            self.directory = os.path.join(data_directory, sub_directory_name)
-        
-        self.settings = pd.read_json(os.path.join(data_directory, 'settings.json'), typ='series')
-        
-        list_of_files = glob.glob(os.path.join(self.directory,'*'))
-        list_of_files.sort()
-        if any(".bin" in file for file in list_of_files):
-            list_of_files_bin = [file for file in list_of_files if ".bin" in file]
-            list_of_files_csv = [file for file in list_of_files if ".csv" in file]
-            if type(file_name) == int:
-                filename = list_of_files_bin[file_name]
-                if filename[:-4] + '.csv' in list_of_files_csv:
-                    print('File already converted')
+    
+    def structure_check_all(self,):
+        status = True
+        for directory in self.list_of_directories:
+            status_temp = self.structure_check(directory)
+            if status_temp == False:
+                status = False
+        return status
+
+    
+    def structure_check(self, directory):
+        direct = directory
+        directory = os.path.join(self.settings['dataset_path'], directory)
+        subdirectories = os.listdir(directory)
+        unwanted = ['emg', 'fp', 'gcLeft', 'gcRight', 'gon', 'id', 'ik_offset', 'jp', 'markers']
+        wanted = ['imu', 'ik']
+        unprocessed = []
+        for subdir in subdirectories:
+            subdirectory = os.path.join(directory, subdir)
+            subsubdirectories = os.listdir(subdirectory)
+            if not(all(x in subsubdirectories for x in wanted)):
+                print(f'Deleting {subdir} for not having all the required fields')
+                shutil.rmtree(subdirectory)
+                continue
+            for subsubdir in subsubdirectories:
+                subsubdirectory = os.path.join(subdirectory, subsubdir)
+                if not os.path.isdir(subsubdirectory) or subsubdir == 'conditions':
+                    continue
+
+                if subsubdir in unwanted:
+                    msg = f'Deleting {direct} / {subdir} / {subsubdir}'
+                    print(msg, ' '*(50 - len(msg)), 'unwanted')
+                    shutil.rmtree(subsubdirectory)
+                    continue
+                
+                msg = f'Checking {direct} / {subdir} / {subsubdir}'
+                print(msg, ' '*(50 - len(msg)),'checking')
+
+                files = os.listdir(subsubdirectory)
+
+                if all(('.csv' in file or '.npz' in file) for file in files):
+                    print('Files already checked')
                 else:
-                    read_data(filename)
-                filename = filename[:-4] + '.csv'
-            else:
-                if os.path.join(self.directory, filename[:-4] + '.csv') in list_of_files_csv:
-                    print('File already converted')
-                else:
-                    read_data(os.path.join(self.directory, filename))
-                filename = os.path.join(self.directory, filename[:-4] + '.csv')
-        else:
-            if type(file_name) == int:
-                filename = list_of_files[file_name]
-            else:
-                filename = os.path.join(self.directory, file_name)
+                    print('Files not saved to csv')
+                    unprocessed.append(subsubdirectory)
         
+
+        if unprocessed != []:
+            print('Unprocessed files:')
+            for subsubdirectory in unprocessed:
+                print(subsubdirectory)
+            return False
+        return True
+
+
+    def process_all(self,):
+        for direct in self.list_of_directories:
+            directory = os.path.join(self.settings['dataset_path'], direct)
+            subdirectories = os.listdir(directory)
+            for subdir in subdirectories:
+                subdirectory = os.path.join(directory, subdir)
+                subsubdir_data = 'imu'
+                subsubdir_gt = 'ik'
+                subsubdirectory_data = os.path.join(subdirectory, subsubdir_data)
+                subsubdirectory_gt = os.path.join(subdirectory, subsubdir_gt)
+                
+                msg = f'Processing {direct} / {subdir} / {subsubdir_data}'
+                print(msg)
+
+                files_imu = os.listdir(subsubdirectory_data)
+                files_imu = [file for file in files_imu if '.csv' in file]
+                files_gt = os.listdir(subsubdirectory_gt)
+
+                if not os.path.isdir(os.path.join(subdirectory, 'angles')):
+                    os.mkdir(os.path.join(subdirectory, 'angles'))
+
+                for file_imu, file_gt in zip(files_imu, files_gt):
+                    data_path = os.path.join(subsubdirectory_data, file_imu)
+                    ground_truth_path = os.path.join(subsubdirectory_gt, file_gt)
+                    calibration_path = os.path.join(subsubdirectory_data, file_imu.replace('.csv', '.npz'))
+                    self.current_calibration = calibration_path
+                    self.get_data_ind(data_path, ground_truth_path, calibration_path)
+                    self.calibrate()
+                    self.calculate_angles('knee', lamb = [])
+                    self.calculate_angles('ankle', lamb = [])
+                    self.save_angles(os.path.join(subdirectory, 'angles', file_imu))
+
+                    
+
+    def get_data_ind(self, data_path, ground_truth_path, calibration_path):        
         self.imus = {'header' : [],
                      'foot': {'accel': [], 'gyro': []},
                      'shank': {'accel': [], 'gyro': []},
@@ -57,7 +119,7 @@ class ANGLE_extractor:
         
         self.peaked = False
 
-        data = pd.read_csv(filename)
+        data = pd.read_csv(data_path)
         
         self.raw_accel = self.settings['raw_accel']
         self.raw_gyro = self.settings['raw_gyro']
@@ -93,28 +155,16 @@ class ANGLE_extractor:
                                                         row[self.settings['names']['thigh_Gyro_Y']],
                                                         row[self.settings['names']['thigh_Gyro_Z']]])
                                                         *self.settings['scale_gyro'])
-            
-        if graph:
-            counter = 1
-            for key, value in self.imus.items():
-                if key == 'header':
-                    continue
-                for key2, value2 in value.items():
-                    plt.subplot(3,2,counter)
-                    plt.plot(value2)
-                    plt.title(f'{key} {key2}')
-                    counter += 1
-            plt.show()
 
         if self.settings['ground_truth']['available']:
-            ground_truth = pd.read_csv(os.path.join(self.directory, self.settings['ground_truth']['path']))
+            ground_truth = pd.read_csv(ground_truth_path)
             self.ground = {'header': ground_truth[self.settings['ground_truth']['header']],
                            'knee': ground_truth[self.settings['ground_truth']['knee']],
                            'ankle': ground_truth[self.settings['ground_truth']['ankle']]}
         else:
             self.ground = None
             
-        if os.path.exists(os.path.join(self.directory, 'calibration.npz')):
+        if os.path.exists(calibration_path):
             self.calibrated = True
         else:
             self.calibrated = False
@@ -165,24 +215,9 @@ class ANGLE_extractor:
         
         times = self.imus['header']
 
-        # plt.figure()
-        # plt.plot(times, accel)
-        # plt.show()
-
-        # ranges = input('Enter ranges for peaks:    ')
-
-        # ranges = ranges.split(' ')
-        # ranges = [float(x) for x in ranges]
 
         starter = 0
         ender = len(times)-1
-        # for t in times:
-        #     if t < ranges[0]:
-        #         starter += 1
-        #     if t < ranges[1]:
-        #         ender += 1
-        #     else:
-        #         break
         
         acce_temp = accel[starter:ender]
         val_range = maxi[pos] - mini[pos]
@@ -346,7 +381,7 @@ class ANGLE_extractor:
     def calibrate(self,):
         if self.calibrated:
             print('Already calibrated!')
-            loaded = np.load(os.path.join(self.directory, 'calibration.npz'))
+            loaded = np.load(self.current_calibration)
             self.knee_j1 = loaded['knee_j1']
             self.knee_j2 = loaded['knee_j2']
             self.knee_o1 = loaded['knee_o1']
@@ -366,20 +401,16 @@ class ANGLE_extractor:
                                                  self.imus['header'])
             
             signos = ((1,1),(1,-1),(-1,1),(-1,-1))
-            plt.figure()
-
+            cum_error = [0,0,0,0]
             for signo1, signo2, num in zip([1,1,-1,-1], [1,-1,1,-1], [1, 2, 3, 4]):
                 angles = self.get_alpha_gyro(self.imus['thigh']['gyro'],
                                              self.imus['shank']['gyro'],
                                              signo1*j1, signo2*j2)
-                
-                plt.plot(self.imus['header'], np.array(angles)*180/np.pi, label = f'{num}) {signo1} {signo2}')
-            if self.ground != None:
-                plt.plot(self.ground['header'], self.ground['knee'], label = 'Ground truth', color = 'black')
-            plt.legend()
-            plt.show()
+                if self.ground != None:
+                    for ang1, ang2, gt1, gt2 in zip(angles[:-1], angles[1:], self.ground['knee'][:-1], self.ground['knee'][1:]):
+                        cum_error[num-1] += ((ang2 - ang1)*180/np.pi - (gt2 - gt1))**2
 
-            signo_1, signo_2 = signos[int(input('Ingrese número seleccionado:    ')) - 1]
+            signo_1, signo_2 = signos[np.argmin(cum_error)]
                         
             self.knee_j1 = signo_1 * j1
             self.knee_j2 = signo_2 * j2
@@ -394,18 +425,15 @@ class ANGLE_extractor:
                                                  self.imus['foot']['gyro'],
                                                  self.imus['header'])
 
-            plt.figure()
+            cum_error = [0,0,0,0]
             for signo1, signo2 , num in zip([1,1,-1,-1], [1,-1,1,-1], [1,2,3,4]):
                 angles = self.get_alpha_gyro(self.imus['shank']['gyro'],
                                              self.imus['foot']['gyro'],
                                              signo1*j1, signo2*j2)
-                plt.plot(self.imus['header'], np.array(angles)*180/np.pi, label = f'{num}) {signo1} {signo2}')
-            if self.ground != None:
-                plt.plot(self.ground['header'], self.ground['ankle'], label = 'Ground truth', color = 'black')
-            plt.legend()
-            plt.show()
-
-            signo_1, signo_2 = signos[int(input('Ingrese número seleccionado:    ')) - 1]
+                if self.ground != None:
+                    for ang1, ang2, gt1, gt2 in zip(angles[:-1], angles[1:], self.ground['ankle'][:-1], self.ground['ankle'][1:]):
+                        cum_error[num-1] += ((ang2 - ang1)*180/np.pi - (gt2 - gt1))**2
+            signo_1, signo_2 = signos[np.argmin(cum_error)]
 
             self.ankle_j1 = signo_1 * j1
             self.ankle_j2 = signo_2 * j2
@@ -414,7 +442,7 @@ class ANGLE_extractor:
             print('Done calibrating ankle')
             print()
             print('Saving files')
-            np.savez(os.path.join(self.directory, 'calibration.npz'),
+            np.savez(self.current_calibration,
                     knee_j1 = self.knee_j1,
                     knee_j2 = self.knee_j2,
                     knee_o1 = self.knee_o1,
@@ -429,7 +457,6 @@ class ANGLE_extractor:
         dt = np.average(np.average(np.diff(self.imus['header'])))
         angle = []
         b, a = butter(2, 7, fs = 1/dt)
-        print(1/dt)
         g1f = self.apply_filter(b, a, g1)
         g2f = self.apply_filter(b, a, g2)
         for g1k, g2k in zip(g1f, g2f):
@@ -470,45 +497,9 @@ class ANGLE_extractor:
             
             
             current = self.signed_angle(temp1, temp2)
+            if joint == 'knee':
+                current = -current
             angle.append(current)
-
-        # if joint == 'ankle':
-        #     maxi = 0
-        #     mini = -4
-        # else:
-        #     maxi = 2
-        #     mini = -4
-
-        # for current in angle:
-        #     if current < mini:
-        #         angle2.append(current + 2*np.pi)
-        #     elif current > maxi:
-        #         angle2.append(current - 2*np.pi)
-        #     else:
-        #         angle2.append(current)
-        #     angle2[-1] = -angle2[-1]
-        
-        # derivada = [a - b for a, b in zip(angle[1:], angle[:-1])]
-        # # angle2 = [angle[0]]
-        # calib = 0
-        # for drv, ang in zip(derivada, angle[1:]):
-        #     if drv > 5.6:
-        #         calib += 2*np.pi
-        #     elif drv < -5.6:
-        #         calib -= 2*np.pi
-        #     angle2.append(ang - calib)
-
-        # fig, ax1 = plt.subplots()
-
-        # ax1.plot(self.imus['header'][2:-2], angle, color = 'black', label = 'Estimated angle')
-        # # ax1.plot(self.imus['header'][2:-2], angle2, color = 'blue', label = 'Estimated angle 2')
-        # if self.ground != None:
-        #     ax1.plot(self.ground['header'], self.ground['knee']/180*np.pi, label = 'Ground truth', color = 'red')
-        # ax1.legend()
-
-        # ax2 = ax1.twinx()
-        # ax2.plot(self.imus['header'][3:-2], derivada, color = 'green', label = 'Derivative')
-        # plt.show()
         return angle
 
     
@@ -539,7 +530,7 @@ class ANGLE_extractor:
         return angle
         
     
-    def get_alpha_fusion(self, gyro, accel, lamb = 0.05):
+    def get_alpha_fusion(self, gyro, accel, lamb = 0.0005):
         gyro = np.array(gyro)+accel[0]
         angle = [accel[0]]
         group = 0
@@ -582,15 +573,15 @@ class ANGLE_extractor:
         if joint == 'knee':
             self.knee_gyro, self.knee_accel, self.knee_fusion, self.knee_time = self.get_alpha_fusion(gyro, accel, lamb)
             temp = (self.knee_fusion)*180/np.pi
-            error_current = np.sum([((a - b)**2)/1000000 for a, b in zip(temp, self.ground['knee'])])
+            error_current = np.sum([((a - b)**2)/10000 for a, b in zip(temp, self.ground['knee'])])
         else:
             self.ankle_gyro, self.ankle_accel, self.ankle_fusion, self.ankle_time = self.get_alpha_fusion(gyro, accel, lamb)
             temp = (self.ankle_fusion)*180/np.pi
-            error_current = np.sum([((a - b)**2)/1000000 for a, b in zip(temp, self.ground['ankle'])])
+            error_current = np.sum([((a - b)**2)/10000 for a, b in zip(temp, self.ground['ankle'])])
         return error_current
 
 
-    def calculate_angles(self, joint, lamb = 0.05):
+    def calculate_angles(self, joint, lamb = 0.0005):
         if self.peaked == False:
             self.get_peaks()
         
@@ -600,12 +591,8 @@ class ANGLE_extractor:
         if type(lamb) != list:   
             if joint == 'knee':
                 self.knee_gyro, self.knee_accel, self.knee_fusion, self.knee_time = self.get_alpha_fusion(gyro, accel, lamb)
-                # filter to remove jagged calculations
-                self.knee_fusion = filtfilt([1/4]*4, [1,0,0,0], self.knee_fusion)
             else:
                 self.ankle_gyro, self.ankle_accel, self.ankle_fusion, self.ankle_time = self.get_alpha_fusion(gyro, accel, lamb)
-                # filter to remove jagged calculations
-                self.ankle_fusion = filtfilt([1/4]*4, [1,0,0,0], self.ankle_fusion)
         
         else:
             lamb = 0
@@ -616,12 +603,25 @@ class ANGLE_extractor:
 
             if joint == 'knee':
                 self.knee_gyro, self.knee_accel, self.knee_fusion, self.knee_time = self.get_alpha_fusion(gyro, accel, res.x[0])
+                # plt.figure(figsize=(10, 5))
+                # plt.plot(self.knee_time, self.knee_fusion*180/np.pi, label = 'Estimated angle')
+                # plt.plot(self.ground['header'], self.ground['knee'], label = 'Ground truth', color = 'red')
+                # plt.legend()
+                # plt.title(self.current_calibration[:-4] + 'Knee')
+                # plt.show()
             else:
                 self.ankle_gyro, self.ankle_accel, self.ankle_fusion, self.ankle_time = self.get_alpha_fusion(gyro, accel, res.x[0])
+                # plt.figure(figsize=(10, 5))
+                # plt.plot(self.ankle_time, self.ankle_fusion*180/np.pi, label = 'Estimated angle')
+                # plt.plot(self.ground['header'], self.ground['ankle'], label = 'Ground truth', color = 'red')
+                # plt.legend()
+                # plt.title(self.current_calibration[:-4] + 'Ankle')
+                # plt.show()
 
 
-    def save_angles(self,):
-        with open(os.path.join(self.directory, 'angles.csv'), 'w') as file:
+
+    def save_angles(self, directory):
+        with open(directory, 'w') as file:
             file.write('Time,Knee_gyro,Knee_accel,Knee_fusion,Ankle_gyro,Ankle_accel,Ankle_fusion\n')
             for time, knee_gyro, knee_accel, knee_fusion, ankle_gyro, ankle_accel, ankle_fusion in \
                 zip(self.knee_time, \
